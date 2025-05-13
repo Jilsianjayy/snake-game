@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Game Ular</title>
+  <style>
+    body {
+      margin: 0;
+      background: #000;
+      color: #fff;
+      font-family: sans-serif;
+      text-align: center;
+    }
+    canvas {
+      display: block;
+      margin: 20px auto;
+      background: #111;
+      border: 2px solid #fff;
+    }
+    .hud {
+      font-size: 18px;
+      margin-bottom: 10px;
+    }
+    .controls {
+      margin-top: 10px;
+    }
+    .controls button {
+      font-size: 14px; /* Mengurangi ukuran font tombol */
+      padding: 8px 16px; /* Mengurangi ukuran padding tombol */
+      margin: 5px;
+      background-color: #444;
+      color: white;
+      border: none;
+      cursor: pointer;
+    }
+    .controls button:hover {
+      background-color: #666;
+    }
+    .start-btn {
+      background-color: #28a745;
+      font-size: 16px; /* Ukuran font tombol mulai */
+    }
+  </style>
+</head>
+<body>
+  <h1>🐍 Game Ular</h1>
+  <p>Gunakan tombol untuk mengontrol ular</p>
+  <canvas id="game" width="400" height="400"></canvas>
+  <div class="hud">
+    <span id="score">Skor: 0</span> | 
+    <span id="level">Level: 1</span> |
+    <span id="highscore">High Score: 0</span>
+  </div>
+  <div class="controls">
+    <button id="start-btn" class="start-btn">Mulai Game</button><br>
+    <button id="up-btn">↑</button>
+    <button id="left-btn">←</button>
+    <button id="down-btn">↓</button>
+    <button id="right-btn">→</button>
+  </div>
+
+  <!-- Suara Lokal -->
+  <audio id="game-over-audio" src="gameover.wav" preload="auto"></audio>
+  <audio id="eat-sound" src="makan.mp3" preload="auto"></audio>
+
+  <script>
+    const canvas = document.getElementById("game");
+    const ctx = canvas.getContext("2d");
+    const scoreEl = document.getElementById("score");
+    const levelEl = document.getElementById("level");
+    const highScoreEl = document.getElementById("highscore");
+
+    const gameOverAudio = document.getElementById("game-over-audio");
+    const eatSound = document.getElementById("eat-sound");
+
+    const width = canvas.width;
+    const height = canvas.height;
+    const gridSize = 20;
+
+    let snake = [
+      { x: 200, y: 200 },
+      { x: 180, y: 200 },
+      { x: 160, y: 200 }
+    ];
+
+    let food = spawnFood();
+    let obstacles = [];
+    let dx = gridSize, dy = 0;
+    let grow = false, isMoving = false, isGameOver = false;
+    let score = 0, level = 1, speed = 200;
+    let interval, bannerPulse = 1, pulseDir = 1;
+
+    let particles = [];
+
+    let highScore = localStorage.getItem("snakeHighScore") || 0;
+    highScoreEl.textContent = "High Score: " + highScore;
+
+    document.getElementById("start-btn").onclick = () => {
+      if (!isMoving && !isGameOver) {
+        isMoving = true;
+        reset();
+        gameLoop();
+      }
+    };
+
+    document.getElementById("up-btn").onclick = () => { if (dy === 0) dx = 0, dy = -gridSize; };
+    document.getElementById("down-btn").onclick = () => { if (dy === 0) dx = 0, dy = gridSize; };
+    document.getElementById("left-btn").onclick = () => { if (dx === 0) dx = -gridSize, dy = 0; };
+    document.getElementById("right-btn").onclick = () => { if (dx === 0) dx = gridSize, dy = 0; };
+
+    function reset() {
+      snake = [
+        { x: 200, y: 200 },
+        { x: 180, y: 200 },
+        { x: 160, y: 200 }
+      ];
+      dx = gridSize; dy = 0;
+      score = 0; level = 1; speed = 200;
+      food = spawnFood();
+      obstacles = [];
+      particles = [];
+      updateHUD();
+    }
+
+    function spawnFood() {
+      let x, y;
+      do {
+        x = Math.floor(Math.random() * (width / gridSize)) * gridSize;
+        y = Math.floor(Math.random() * (height / gridSize)) * gridSize;
+      } while (snake.some(s => s.x === x && s.y === y));
+      return { x, y };
+    }
+
+    function spawnObstacles() {
+      obstacles = [];
+      const count = Math.min(level - 2, 5);
+      for (let i = 0; i < count; i++) {
+        const x = Math.floor(Math.random() * (width / gridSize)) * gridSize;
+        const y = Math.floor(Math.random() * (height / gridSize)) * gridSize;
+        if (!snake.some(s => s.x === x && s.y === y) && !(food.x === x && food.y === y)) {
+          obstacles.push({ x, y });
+        }
+      }
+    }
+
+    function updateHUD() {
+      level = Math.floor(score / 5) + 1;
+      speed = Math.max(50, 200 - score * 5);
+      scoreEl.textContent = "Skor: " + score;
+      levelEl.textContent = "Level: " + level;
+      highScoreEl.textContent = "High Score: " + highScore;
+      if (level >= 3) spawnObstacles();
+    }
+
+    function wrap(pos, max) {
+      return (pos + max) % max;
+    }
+
+    function createExplosion(x, y) {
+      for (let i = 0; i < 20; i++) {
+        particles.push({
+          x: x + gridSize / 2,
+          y: y + gridSize / 2,
+          dx: (Math.random() - 0.5) * 4,
+          dy: (Math.random() - 0.5) * 4,
+          life: 30
+        });
+      }
+    }
+
+    function updateParticles() {
+      particles = particles.filter(p => p.life-- > 0);
+      for (let p of particles) {
+        p.x += p.dx;
+        p.y += p.dy;
+      }
+    }
+
+    function gameLoop() {
+      if (!isMoving || isGameOver) return;
+
+      const head = {
+        x: wrap(snake[0].x + dx, width),
+        y: wrap(snake[0].y + dy, height)
+      };
+
+      if (snake.slice(1).some(s => s.x === head.x && s.y === head.y) ||
+          obstacles.some(o => o.x === head.x && o.y === head.y)) {
+        isGameOver = true;
+        isMoving = false;
+        createExplosion(head.x, head.y);
+        gameOverAudio.play();
+        if (score > highScore) {
+          localStorage.setItem("snakeHighScore", score);
+          highScore = score;
+        }
+        draw();
+        return;
+      }
+
+      snake.unshift(head);
+      if (head.x === food.x && head.y === food.y) {
+        grow = true;
+        score++;
+        food = spawnFood();
+        eatSound.play();
+        updateHUD();
+      }
+      if (!grow) snake.pop(); else grow = false;
+
+      clearInterval(interval);
+      interval = setInterval(gameLoop, speed);
+      draw();
+    }
+
+    function drawBackground() {
+      ctx.strokeStyle = "#222";
+      for (let x = 0; x <= width; x += gridSize) {
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, height);
+        ctx.stroke();
+      }
+      for (let y = 0; y <= height; y += gridSize) {
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(width, y);
+        ctx.stroke();
+      }
+    }
+
+    function drawBanner(text) {
+      bannerPulse += pulseDir * 0.02;
+      if (bannerPulse >= 1.1 || bannerPulse <= 0.9) pulseDir *= -1;
+
+      ctx.save();
+      ctx.translate(width / 2, height / 2);
+      ctx.scale(bannerPulse, bannerPulse);
+
+      ctx.fillStyle = "rgba(0, 0, 0, 0.8)";
+      ctx.fillRect(-150, -40, 300, 80);
+      ctx.strokeStyle = "#fff";
+      ctx.strokeRect(-150, -40, 300, 80);
+
+      ctx.fillStyle = "white";
+      ctx.font = "24px sans-serif";
+      ctx.textAlign = "center";
+      ctx.fillText(text, 0, 10);
+      ctx.restore();
+    }
+
+    function draw() {
+      ctx.clearRect(0, 0, width, height);
+      drawBackground();
+
+      ctx.fillStyle = "red";
+      ctx.beginPath();
+      ctx.arc(food.x + gridSize / 2, food.y + gridSize / 2, gridSize / 2, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.fillStyle = "gray";
+      for (let obs of obstacles) {
+        ctx.fillRect(obs.x, obs.y, gridSize, gridSize);
+      }
+
+      for (let i = 0; i < snake.length; i++) {
+        ctx.fillStyle = i === 0 ? "lime" : "green";
+        ctx.beginPath();
+        ctx.arc(snake[i].x + gridSize / 2, snake[i].y + gridSize / 2, gridSize / 2, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      updateParticles();
+      ctx.fillStyle = "yellow";
+      for (let p of particles) {
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, 2, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      if (!isMoving && !isGameOver) drawBanner("MULAI GAME");
+      if (isGameOver && particles.length === 0) drawBanner("GAME OVER");
+
+      requestAnimationFrame(draw);
+    }
+
+    draw();
+  </script>
+</body>
+</html>
